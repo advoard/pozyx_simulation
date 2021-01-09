@@ -44,3 +44,97 @@ rosrun pozyx_simulation uwb_simulation.py
 Noise has been added to the every UWB ranging data </br> 
 
 np.random.normal(0, uwb_dist*0.015,1)
+
+## How to use 
+1.Add uwb tag code urdf file
+```
+  <joint name="uwb_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="uwb_link"/>
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/>
+  </joint>
+
+  <link name="uwb_link"/>
+```
+
+For this process get robot or drone real position afther that to place uwb anchor in maps. 
+1. go repo folder /launch/uwb_anchors_set.launch and open 
+2. for each uwb anchor's set a name and position for example 
+```
+<launch>
+   <node pkg="tf" type="static_transform_publisher" name="uwb_anchor_0x6e36" args="1.4 2.0 0.0 0 0 0 1 map uwb_anchor_0 100" />
+   <node pkg="tf" type="static_transform_publisher" name="uwb_anchor_0x6e33" args="-1.4 2.0 0.0 0 0 0 1 map uwb_anchor_1 100" />
+   <node pkg="tf" type="static_transform_publisher" name="uwb_anchor_0x6e49" args="1.4 -2.0 0.0 0 0 0 1 map uwb_anchor_2 100" />   
+   <node pkg="tf" type="static_transform_publisher" name="uwb_anchor_0x6e30" args="-1.4 -2.0 0.0 0 0 0 1 map uwb_anchor_3 100" />
+</launch>
+```
+3. go /src/uwb_simulation.py file and add anchors 
+
+```
+def uwb_simulate(sensor_pos):
+    while not rospy.is_shutdown():
+        time.sleep(0.1)
+        all_distance = [] 
+        all_destination_id = []
+
+        for i in range(len(sensor_pos)):
+            #calculate distance uwb to robot for all anchors 
+            dist = calculate_distance(sensor_pos[i])   
+            all_distance.append(dist) 
+        
+        #uwb_anchors_set.launch same order (not important for simulation)
+        all_destination_id.append(0x694b)
+        all_destination_id.append(0x6948)
+        all_destination_id.append(0x694f)
+        all_destination_id.append(0x694a)
+            
+        #publish data with ROS             
+        publish_data(all_destination_id , all_distance)  
+```
+
+Now pack is ready to run.  
+1. Firstly call anchors 
+`roslaunch pozyx_simulation uwb_anchors_set.launch `
+2. After that run main calculation script 
+`roslaunch pozyx_simulation uwb_manually_initializing.launch`
+
+For check all pack is working  
+`rostopic echo /uwb_data_topic` 
+
+This process give robot to uwb_anchor distance for example 
+```
+destination_id: [26955, 26952, 26959, 26954]
+distance: [4192.039813830616, 2564.0268225317145, 3703.2810901751322, 1621.13755039097]
+stamp: 
+  - 
+    secs: 1039
+    nsecs: 440000000
+  - 
+    secs: 1039
+    nsecs: 440000000
+  - 
+    secs: 1039
+    nsecs: 440000000
+---
+```
+
+This simulation give only robot to anchors distance. For calculate robot position use ieuagv_localization repo
+https://github.com/bekirbostanci/ieuagv_localization
+
+
+
+## Run
+!! You have to add UWB tag your robot urdf 
+```
+export TURTLEBOT3_MODEL=burger
+roslaunch turtlebot3_gazebo turtlebot3_world.launch 
+
+export TURTLEBOT3_MODEL=burger
+roslaunch turtlebot3_navigation turtlebot3_navigation.launch 
+
+roslaunch pozyx_simulation uwb_anchors_set.launch 
+
+rosrun pozyx_simulation uwb_simulation.py 
+
+rosrun advoard_localization kalman_filter_localization.py 
+```
