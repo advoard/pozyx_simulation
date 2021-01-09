@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 '''
 __author__ = "Bekir Bostanci"
 __license__ = "BSD"
@@ -9,7 +9,7 @@ __email__ = "bekirbostanci@gmail.com"
 
 import rospy
 
-from ieu_agv.msg import  uwb_data
+from pozyx_simulation.msg import  uwb_data
 from gazebo_msgs.msg import ModelStates
 import tf 
 
@@ -48,7 +48,6 @@ def get_anchors_pos():
         except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
             break
 
-    sensor_pos = np.dot(sensor_pos,1000)
 
 
     if sensor_pos == [] :
@@ -60,10 +59,8 @@ def get_anchors_pos():
 
     return sensor_pos
 
-def calculate_distance(uwb_pose):
+def calculate_distance(uwb_pose,robot_pose):
     #pose comes in gazebo/model_states (real position)
-    global robot_pose_x,robot_pose_y,robot_pose_z
-    robot_pose = [robot_pose_x,robot_pose_y,robot_pose_z]
 
     #describe 2 points
     p1 = np.array(uwb_pose)
@@ -76,27 +73,32 @@ def calculate_distance(uwb_pose):
     return np.sqrt(uwb_dist)
 
 
-def uwb_simulate(sensor_pos):
-
+def uwb_simulate(uwb_link,sensor_pos):
+    listener = tf.TransformListener()
+    
+    listener.waitForTransform("/map", uwb_link, rospy.Time(), rospy.Duration(4.0))
     while not rospy.is_shutdown():
-        time.sleep(0.1)
-        all_distance = [] 
-        all_destination_id = []
-
-        for i in range(len(sensor_pos)):
-            #calculate distance uwb to robot for all anchors 
-            dist = calculate_distance(sensor_pos[i])   
-            all_distance.append(dist) 
-        
-        #uwb_anchors_set.launch same order (not important for simulation)
-        all_destination_id.append(0x694b)
-        all_destination_id.append(0x6948)
-        all_destination_id.append(0x694f)
-        all_destination_id.append(0x694a)
+        try:
+            trans = get_robot_pose(listener,uwb_link)
             
-        #publish data with ROS             
-        publish_data(all_destination_id , all_distance)    
+            all_distance = [] 
+            all_destination_id = []
+            for i in range(len(sensor_pos)):
+                #calculate distance uwb to robot for all anchors 
+                dist = calculate_distance(sensor_pos[i],trans)   
+                all_distance.append(dist) 
+            
+            #uwb_anchors_set.launch same order (not important for simulation)
+            all_destination_id.append(0x694b)
+            all_destination_id.append(0x6948)
+            all_destination_id.append(0x694f)
+            all_destination_id.append(0x694a)
+                
+            #publish data with ROS             
+            publish_data(all_destination_id , all_distance)    
 
+        except (tf.LookupException, tf.ConnectivityException):
+            print("error")
 
 def publish_data(all_destination_id, all_distance):
     #uwb message type is a special message so that firstly describe this message 
@@ -106,39 +108,27 @@ def publish_data(all_destination_id, all_distance):
     uwb_data_cell.distance = all_distance
     pub.publish(uwb_data_cell)
 
-
-def subscribe_data(ModelStates):
+def get_robot_pose(listener,uwb_link):
     #for the get real position of robot subscribe model states topic  
-    global robot_pose_x,robot_pose_y,robot_pose_z
-    global counter
-    counter = counter +1 
+    now = rospy.Time.now()
+    listener.waitForTransform("/map", uwb_link, now, rospy.Duration(4.0))
+    (trans,rot) = listener.lookupTransform("/map", uwb_link, now)
+    return trans
 
-    #gazebo/modelstate topic frequency is 100 hz. We descrese 10 hz with log method 
-    if counter %100 ==  0:  
-        counter = 0 
 
-        #ModelStates.pose[2] = turtlebot3 model real position on modelstates   
-        robot_pose_x =ModelStates.pose[MODELSTATE_INDEX].position.x*1000
-        robot_pose_y =ModelStates.pose[MODELSTATE_INDEX].position.y*1000
-        robot_pose_z =ModelStates.pose[MODELSTATE_INDEX].position.z*1000
-        
+
 
 if __name__ == "__main__":
     #get uwb anchors postion
     sensor_pos = []
     sensor_pos = get_anchors_pos()
 
-    MODELSTATE_INDEX = rospy.get_param('/pozyx_simulation/modelstate_index',2)
-    rospy.loginfo("%s is %s", rospy.resolve_name('/pozyx_simulation/modelstate_index'), MODELSTATE_INDEX)
-
 
     time.sleep(0.5)
 
-    #get robot real position => you can change ModelStates.pose[] different robot's
-    rospy.Subscriber('gazebo/model_states', ModelStates, subscribe_data)
 
     #start the publish uwb data
-    uwb_simulate(sensor_pos)
+    uwb_simulate("/uwb_link",sensor_pos)
     rospy.spin()
     
 sys.exit()
